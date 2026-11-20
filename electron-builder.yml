@@ -1,0 +1,68 @@
+appId: life.wonderfullists.desktop
+productName: Wonderful Lists
+copyright: Copyright © 2026 wikialf11
+
+directories:
+  buildResources: build
+  output: release
+
+files:
+  - out/**/*
+  - package.json
+
+protocols:
+  - name: Wonderful Lists
+    schemes:
+      - wonderfullists
+
+mac:
+  category: public.app-category.productivity
+  darkModeSupport: true
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  artifactName: Wonderful-Lists-${version}-${arch}.${ext}
+  extendInfo:
+    NSHumanReadableCopyright: Copyright © 2026 Wonderful Lists
+    CFBundleURLTypes:
+      - CFBundleURLName: life.wonderfullists.desktop
+        CFBundleURLSchemes:
+          - wonderfullists
+
+dmg:
+  title: Wonderful Lists ${version}
+  contents:
+    - x: 140
+      y: 200
+      type: file
+    - x: 400
+      y: 200
+      type: link
+      path: /Applications
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: Wonderful-Lists-Setup-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  deleteAppDataOnUninstall: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Wonderful Lists
+  runAfterFinish: true
+
+linux:
+  target:
+    - AppImage
+  category: Office

@@ -1,0 +1,12 @@
+node_modules/
+out/
+release/
+dist/
+.env
+.env.local
+config.json
+resources/config.json
+supabase/.temp/
+supabase/.branches/
+*.log
+.DS_Store
