@@ -128,8 +128,10 @@ export const EditTaskDialog = ({ task, listId, listOwnerId, onClose, onSaved, bg
   const [busy, setBusy] = useState(false);
   const [activeFields, setActiveFields] = useState<Set<FieldKey>>(new Set());
   const [showFieldMenu, setShowFieldMenu] = useState(false);
-  
-  const fieldMenuRef = useRef<HTMLDivElement>(null);
+  const [lastAddedField, setLastAddedField] = useState<FieldKey | null>(null);
+  const fieldRefs = useRef<Partial<Record<FieldKey, HTMLDivElement | null>>>({});
+  const [lastAddedCustomField, setLastAddedCustomField] = useState<string | null>(null);
+  const customFieldRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // Custom AI-generated fields
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
@@ -213,16 +215,32 @@ export const EditTaskDialog = ({ task, listId, listOwnerId, onClose, onSaved, bg
     return () => { cancelled = true; };
   }, [task?.id]);
 
+  // A newly added field can be inserted far from the "Añadir campo" button
+  // (fields render in canonical order). Bring it into view and focus it so it
+  // is obvious that the field was actually added.
   useEffect(() => {
-    if (!showFieldMenu) return;
-    const onDown = (e: MouseEvent) => {
-      if (fieldMenuRef.current && !fieldMenuRef.current.contains(e.target as Node)) {
-        setShowFieldMenu(false);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [showFieldMenu]);
+    if (!lastAddedField) return;
+    const element = fieldRefs.current[lastAddedField];
+    if (!element) return;
+    element.scrollIntoView({ block: "center", behavior: "smooth" });
+    const focusable = element.querySelector<HTMLElement>(
+      "textarea, input:not([type=hidden]), select",
+    );
+    focusable?.focus({ preventScroll: true });
+    setLastAddedField(null);
+  }, [lastAddedField]);
+
+  useEffect(() => {
+    if (!lastAddedCustomField) return;
+    const element = customFieldRefs.current[lastAddedCustomField];
+    if (!element) return;
+    element.scrollIntoView({ block: "center", behavior: "smooth" });
+    const focusable = element.querySelector<HTMLElement>(
+      "textarea, input:not([type=hidden]), select",
+    );
+    focusable?.focus({ preventScroll: true });
+    setLastAddedCustomField(null);
+  }, [lastAddedCustomField]);
 
   useEffect(() => {
     if (!task) return;
@@ -320,6 +338,7 @@ export const EditTaskDialog = ({ task, listId, listOwnerId, onClose, onSaved, bg
     if (k === "completable") setCompletable(true);
     if (k === "table") setTableData((current) => current ?? emptyTaskTable());
     setShowFieldMenu(false);
+    setLastAddedField(k);
   };
 
   const removeField = (k: FieldKey) => {
@@ -448,6 +467,7 @@ export const EditTaskDialog = ({ task, listId, listOwnerId, onClose, onSaved, bg
       return n;
     });
     setShowFieldMenu(false);
+    setLastAddedCustomField(cfId);
   };
 
   const removeCustomField = (cfId: string) => {
@@ -1133,16 +1153,34 @@ export const EditTaskDialog = ({ task, listId, listOwnerId, onClose, onSaved, bg
         )}
 
         {/* Active fields, in canonical order */}
-        {FIELD_ORDER.filter((k) => activeFields.has(k)).map((k) => renderField(k))}
+        {FIELD_ORDER.filter((k) => activeFields.has(k)).map((k) => (
+          <div
+            key={k}
+            ref={(element) => {
+              fieldRefs.current[k] = element;
+            }}
+          >
+            {renderField(k)}
+          </div>
+        ))}
 
         {/* Active custom (AI) fields */}
-        {customFields.filter((cf) => activeCustomFieldIds.has(cf.id)).map((cf) => renderCustomField(cf))}
+        {customFields.filter((cf) => activeCustomFieldIds.has(cf.id)).map((cf) => (
+          <div
+            key={cf.id}
+            ref={(element) => {
+              customFieldRefs.current[cf.id] = element;
+            }}
+          >
+            {renderCustomField(cf)}
+          </div>
+        ))}
 
         {/* + Add field button (Notion-style) */}
         {canEdit && (() => {
           const hasAnything = available.length + availableCustom.length > 0;
           return (
-          <div ref={fieldMenuRef} className="relative mb-4">
+          <div className="relative mb-4">
             <button
               type="button"
               onClick={() => setShowFieldMenu((v) => !v)}
@@ -1154,42 +1192,66 @@ export const EditTaskDialog = ({ task, listId, listOwnerId, onClose, onSaved, bg
               {!hasAnything ? "Todos los campos añadidos" : "Añadir campo"}
             </button>
             {showFieldMenu && hasAnything && (
-              <ul
-                className="absolute left-0 right-0 top-full mt-2 z-30 shadow-brutal max-h-[480px] overflow-y-auto"
-                style={{ backgroundColor: bgColor, color: inkColor, border: `3px solid ${inkColor}` }}
+              <div
+                className="fixed inset-0 z-[120] flex items-center justify-center p-4"
+                style={{ backgroundColor: `${inkColor}cc` }}
+                onClick={() => setShowFieldMenu(false)}
               >
-                {available.map((k) => (
-                  <li key={k}>
+                <div
+                  className="w-full max-w-md max-h-[75vh] overflow-y-auto shadow-brutal"
+                  style={{ backgroundColor: bgColor, color: inkColor, border: `4px solid ${inkColor}` }}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div
+                    className="flex items-center justify-between px-3 py-2 sticky top-0"
+                    style={{ backgroundColor: bgColor, borderBottom: `3px solid ${inkColor}` }}
+                  >
+                    <span className="font-mono-brutal text-xs uppercase">Añadir campo</span>
                     <button
                       type="button"
-                      onClick={() => addField(k)}
-                      className="w-full text-left px-3 py-2 font-mono-brutal text-sm uppercase flex items-center gap-2"
-                      style={{ borderBottom: `2px solid ${inkColor}` }}
+                      onClick={() => setShowFieldMenu(false)}
+                      aria-label="Cerrar selector de campos"
+                      className="font-mono-brutal text-sm uppercase w-8 h-8 flex items-center justify-center leading-none"
+                      style={{ backgroundColor: bgColor, color: inkColor, border: `2px solid ${inkColor}` }}
                     >
-                      <Plus className="w-4 h-4 shrink-0" strokeWidth={3} />
-                      {FIELD_LABELS[k]}
+                      ×
                     </button>
-                  </li>
-                ))}
-                {availableCustom.map((cf) => {
-                  const blocked = false;
-                  return (
-                    <li key={cf.id}>
-                      <button
-                        type="button"
-                        onClick={() => addCustomField(cf.id)}
-                        title={blocked ? "Disponible solo para usuarios premium" : undefined}
-                        className="w-full text-left px-3 py-2 font-mono-brutal text-sm uppercase flex items-center gap-2"
-                        style={{ borderBottom: `2px solid ${inkColor}`, opacity: blocked ? 0.55 : 1 }}
-                      >
-                        {renderCustomFieldIcon(cf.icon) ?? <Plus className="w-4 h-4 shrink-0" strokeWidth={3} />}
-                        <span className="flex-1 truncate">{cf.name}</span>
-                        {blocked && <Lock className="w-3.5 h-3.5 shrink-0" strokeWidth={3} />}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
+                  </div>
+                  <ul>
+                    {available.map((k) => (
+                      <li key={k}>
+                        <button
+                          type="button"
+                          onClick={() => addField(k)}
+                          className="w-full text-left px-3 py-3 font-mono-brutal text-sm uppercase flex items-center gap-2"
+                          style={{ borderBottom: `2px solid ${inkColor}` }}
+                        >
+                          <Plus className="w-4 h-4 shrink-0" strokeWidth={3} />
+                          {FIELD_LABELS[k]}
+                        </button>
+                      </li>
+                    ))}
+                    {availableCustom.map((cf) => {
+                      const blocked = false;
+                      return (
+                        <li key={cf.id}>
+                          <button
+                            type="button"
+                            onClick={() => addCustomField(cf.id)}
+                            title={blocked ? "Disponible solo para usuarios premium" : undefined}
+                            className="w-full text-left px-3 py-3 font-mono-brutal text-sm uppercase flex items-center gap-2"
+                            style={{ borderBottom: `2px solid ${inkColor}`, opacity: blocked ? 0.55 : 1 }}
+                          >
+                            {renderCustomFieldIcon(cf.icon) ?? <Plus className="w-4 h-4 shrink-0" strokeWidth={3} />}
+                            <span className="flex-1 truncate">{cf.name}</span>
+                            {blocked && <Lock className="w-3.5 h-3.5 shrink-0" strokeWidth={3} />}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              </div>
             )}
           </div>
           );
