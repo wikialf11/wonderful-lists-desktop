@@ -6,6 +6,10 @@ directories:
   buildResources: build
   output: release
 
+# Sign every macOS bundle ad-hoc after packing. Without any signature Apple
+# Silicon reports the app as "damaged" and refuses to open it.
+afterPack: build/afterPack.cjs
+
 files:
   - out/**/*
   - package.json

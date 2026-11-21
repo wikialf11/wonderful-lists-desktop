@@ -5,8 +5,8 @@ Los instaladores están en
 
 ## macOS
 
-- `Wonderful-Lists-0.7.1-arm64.dmg` → Apple Silicon (M1/M2/M3/M4)
-- `Wonderful-Lists-0.7.1-x64.dmg` → Intel
+- `Wonderful-Lists-0.7.2-arm64.dmg` → Apple Silicon (M1/M2/M3/M4)
+- `Wonderful-Lists-0.7.2-x64.dmg` → Intel
 
 1. Abre el `.dmg` y arrastra **Wonderful Lists** a Aplicaciones.
 2. La build no está firmada. La primera vez:
@@ -19,7 +19,7 @@ Los instaladores están en
 
 ## Windows
 
-- `Wonderful-Lists-Setup-0.7.1-x64.exe`
+- `Wonderful-Lists-Setup-0.7.2-x64.exe`
 
 1. Ejecuta el instalador.
 2. SmartScreen mostrará “Editor desconocido”: **Más información** →
