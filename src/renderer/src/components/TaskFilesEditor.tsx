@@ -42,8 +42,11 @@ export function TaskFilesEditor({ files, onChange, onUploadingChange, inkColor, 
       }
       setBusy(1);
       try {
-        const path = `${crypto.randomUUID()}-${safeTaskFileName(file.name)}`;
-        const { error } = await supabase.storage.from("task-files").upload(path, file);
+        // `upload` adds the "task-files/" bucket internally. Store the full
+        // relative path so opening it later resolves under attachments/.
+        const objectPath = `${crypto.randomUUID()}-${safeTaskFileName(file.name)}`;
+        const path = `task-files/${objectPath}`;
+        const { error } = await supabase.storage.from("task-files").upload(objectPath, file);
         if (error) throw error;
         accepted.push({
           id: crypto.randomUUID(),

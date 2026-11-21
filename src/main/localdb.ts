@@ -1036,12 +1036,27 @@ export function resolveLocalAttachmentUrl(url: string): string | null {
   }
 }
 
+function attachmentPathCandidates(relativePath: string): string[] {
+  const normalized = relativePath.replaceAll("\\", "/").replace(/^\/+/, "");
+  const candidates = [normalized];
+  // Older builds stored the object path without its bucket prefix.
+  if (!normalized.startsWith("task-files/")) candidates.push(`task-files/${normalized}`);
+  // Very old builds double-prefixed the bucket.
+  if (normalized.startsWith("task-files/task-files/")) {
+    candidates.push(normalized.slice("task-files/".length));
+  }
+  return Array.from(new Set(candidates));
+}
+
 export async function openLocalAttachment(relativePath: string): Promise<{ ok: boolean; error?: string }> {
-  const full = safeAttachmentPath(relativePath);
-  if (!full) return { ok: false, error: "Ruta no válida" };
-  if (!existsSync(full)) return { ok: false, error: "El archivo no existe" };
-  const error = await shell.openPath(full);
-  return error ? { ok: false, error } : { ok: true };
+  for (const candidate of attachmentPathCandidates(relativePath)) {
+    const full = safeAttachmentPath(candidate);
+    if (!full) continue;
+    if (!existsSync(full)) continue;
+    const error = await shell.openPath(full);
+    return error ? { ok: false, error } : { ok: true };
+  }
+  return { ok: false, error: "El archivo no existe" };
 }
 
 export function localDbPath(): string {
