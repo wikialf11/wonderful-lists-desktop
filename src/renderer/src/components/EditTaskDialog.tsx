@@ -14,6 +14,10 @@ import { TaskFilesEditor } from "@/components/TaskFilesEditor";
 import { TaskTableEditor } from "@/components/TaskTableEditor";
 import { parseTaskFiles, type TaskFile } from "@/lib/taskFiles";
 import { parseTaskTable, emptyTaskTable, type TaskTable } from "@/lib/taskTable";
+import {
+  normalizeRecurrenceType,
+  type RecurrenceType,
+} from "@/lib/recurrence";
 import type { GraphDefinition } from "@/lib/nodeGraph";
 import { toast } from "sonner";
 import { confirmDialog } from "@/lib/confirm";
@@ -30,6 +34,7 @@ type Task = {
   recurrence_days?: number[];
   recurrence_interval_days?: number;
   recurrence_anchor_date?: string | null;
+  recurrence_type?: string | null;
   reminder_at?: string | null;
   checklist?: ChecklistItem[];
   folder_id?: string | null;
@@ -125,6 +130,7 @@ export const EditTaskDialog = ({ task, listId, listOwnerId, onClose, onSaved, bg
   const [recurrenceDays, setRecurrenceDays] = useState<number[]>([]);
   const [recurrenceIntervalDays, setRecurrenceIntervalDays] = useState<string>("");
   const [recurrenceAnchorDate, setRecurrenceAnchorDate] = useState<string>("");
+  const [recurrenceType, setRecurrenceType] = useState<RecurrenceType | null>(null);
   const [busy, setBusy] = useState(false);
   const [activeFields, setActiveFields] = useState<Set<FieldKey>>(new Set());
   const [showFieldMenu, setShowFieldMenu] = useState(false);
@@ -262,6 +268,9 @@ export const EditTaskDialog = ({ task, listId, listOwnerId, onClose, onSaved, bg
     setTableData(parsedTable);
     const recDays = task.recurrence_days ?? [];
     setRecurrenceDays(recDays);
+    setRecurrenceType(
+      normalizeRecurrenceType(task.recurrence_type, recDays, task.recurrence_interval_days ?? 0),
+    );
     const recInterval =
       task.recurrence_interval_days && task.recurrence_interval_days > 0
         ? String(task.recurrence_interval_days)
@@ -293,7 +302,9 @@ export const EditTaskDialog = ({ task, listId, listOwnerId, onClose, onSaved, bg
     const initial = new Set<FieldKey>();
     if (desc.trim()) initial.add("description");
     if (hasDate) initial.add("date");
-    if (recDays.length > 0 || (task.recurrence_interval_days ?? 0) > 0) initial.add("recurrence");
+    if (normalizeRecurrenceType(task.recurrence_type, recDays, task.recurrence_interval_days ?? 0)) {
+      initial.add("recurrence");
+    }
     if (isCompletable) initial.add("completable");
     if (lnk.trim()) initial.add("link");
     if (rem) initial.add("reminder");
@@ -323,10 +334,26 @@ export const EditTaskDialog = ({ task, listId, listOwnerId, onClose, onSaved, bg
 
   if (!task) return null;
 
+  const todayKey = () => new Date().toISOString().slice(0, 10);
+
+  const setWeeklyRecurrence = (days: number[]) => {
+    setRecurrenceDays(days);
+    setRecurrenceIntervalDays("");
+    setRecurrenceType(days.length > 0 ? "weekly" : null);
+  };
+
   const toggleRecurrenceDay = (d: number) => {
-    setRecurrenceDays((prev) =>
-      prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort()
-    );
+    const next = recurrenceDays.includes(d)
+      ? recurrenceDays.filter((x) => x !== d)
+      : [...recurrenceDays, d].sort();
+    setWeeklyRecurrence(next);
+  };
+
+  const setCalendarRecurrence = (type: "monthly" | "yearly") => {
+    setRecurrenceType(type);
+    setRecurrenceDays([]);
+    setRecurrenceIntervalDays("");
+    setRecurrenceAnchorDate(dueDay || recurrenceAnchorDate || todayKey());
   };
 
   const addField = (k: FieldKey) => {
@@ -349,7 +376,12 @@ export const EditTaskDialog = ({ task, listId, listOwnerId, onClose, onSaved, bg
     });
     if (k === "description") setDescription("");
     if (k === "date") { setDueDay(""); setDueTime(""); }
-    if (k === "recurrence") { setRecurrenceDays([]); setRecurrenceIntervalDays(""); setRecurrenceAnchorDate(""); }
+    if (k === "recurrence") {
+      setRecurrenceDays([]);
+      setRecurrenceIntervalDays("");
+      setRecurrenceAnchorDate("");
+      setRecurrenceType(null);
+    }
     if (k === "completable") setCompletable(false);
     if (k === "link") setLink("");
     if (k === "reminder") setReminderAt("");
@@ -367,9 +399,11 @@ export const EditTaskDialog = ({ task, listId, listOwnerId, onClose, onSaved, bg
     }
     const intervalNum = parseInt(recurrenceIntervalDays, 10);
     const hasInterval = !isNaN(intervalNum) && intervalNum > 0;
-    const hasAnyRecurrence = recurrenceDays.length > 0 || hasInterval;
-    const anchorForInterval = hasInterval
-      ? (recurrenceAnchorDate || new Date().toISOString().slice(0, 10))
+    const hasCalendarRecurrence = recurrenceType === "monthly" || recurrenceType === "yearly";
+    const hasAnyRecurrence =
+      recurrenceDays.length > 0 || hasInterval || hasCalendarRecurrence;
+    const anchorForInterval = hasInterval || hasCalendarRecurrence
+      ? (dueDay || recurrenceAnchorDate || new Date().toISOString().slice(0, 10))
       : null;
 
     let dueIso: string | null = null;
@@ -400,6 +434,7 @@ export const EditTaskDialog = ({ task, listId, listOwnerId, onClose, onSaved, bg
       recurrence_days: recurrenceDays,
       recurrence_interval_days: hasInterval ? intervalNum : 0,
       recurrence_anchor_date: anchorForInterval,
+      recurrence_type: recurrenceType,
       link: link.trim() || null,
       reminder_at: reminderAt ? new Date(reminderAt).toISOString() : null,
       ...(reminderAt !== originalReminder ? { reminder_sent_at: null } : {}),
@@ -969,7 +1004,7 @@ export const EditTaskDialog = ({ task, listId, listOwnerId, onClose, onSaved, bg
           {header}
           <div className="grid grid-cols-7 gap-1 mb-2">
             {WEEKDAYS.map((label, idx) => {
-              const active = recurrenceDays.includes(idx);
+              const active = recurrenceType === "weekly" && recurrenceDays.includes(idx);
               return (
                 <button
                   key={idx}
@@ -991,25 +1026,70 @@ export const EditTaskDialog = ({ task, listId, listOwnerId, onClose, onSaved, bg
             })}
           </div>
           <div className="flex gap-2 mb-2">
-            <button type="button" onClick={() => canEdit && setRecurrenceDays([0,1,2,3,4,5,6])} disabled={!canEdit}
+            <button type="button" onClick={() => canEdit && setWeeklyRecurrence([0,1,2,3,4,5,6])} disabled={!canEdit}
               className="flex-1 font-mono-brutal text-[10px] uppercase py-2 disabled:opacity-60"
               style={{ backgroundColor: bgColor, color: inkColor, border: `3px solid ${inkColor}` }}>Todos</button>
-            <button type="button" onClick={() => canEdit && setRecurrenceDays([1,2,3,4,5])} disabled={!canEdit}
+            <button type="button" onClick={() => canEdit && setWeeklyRecurrence([1,2,3,4,5])} disabled={!canEdit}
               className="flex-1 font-mono-brutal text-[10px] uppercase py-2 disabled:opacity-60"
               style={{ backgroundColor: bgColor, color: inkColor, border: `3px solid ${inkColor}` }}>L–V</button>
-            <button type="button" onClick={() => canEdit && setRecurrenceDays([0,6])} disabled={!canEdit}
+            <button type="button" onClick={() => canEdit && setWeeklyRecurrence([0,6])} disabled={!canEdit}
               className="flex-1 font-mono-brutal text-[10px] uppercase py-2 disabled:opacity-60"
               style={{ backgroundColor: bgColor, color: inkColor, border: `3px solid ${inkColor}` }}>S–D</button>
-            <button type="button" onClick={() => canEdit && setRecurrenceDays([])} disabled={!canEdit}
+            <button type="button" onClick={() => canEdit && setWeeklyRecurrence([])} disabled={!canEdit}
               className="flex-1 font-mono-brutal text-[10px] uppercase py-2 disabled:opacity-60"
               style={{ backgroundColor: bgColor, color: inkColor, border: `3px solid ${inkColor}` }}>Ninguno</button>
           </div>
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <button
+              type="button"
+              onClick={() => canEdit && setCalendarRecurrence("monthly")}
+              disabled={!canEdit}
+              aria-pressed={recurrenceType === "monthly"}
+              className="font-mono-brutal text-xs uppercase py-2 disabled:opacity-60"
+              style={{
+                backgroundColor: recurrenceType === "monthly" ? inkColor : bgColor,
+                color: recurrenceType === "monthly" ? bgColor : inkColor,
+                border: `3px solid ${inkColor}`,
+              }}
+            >
+              Cada mes
+            </button>
+            <button
+              type="button"
+              onClick={() => canEdit && setCalendarRecurrence("yearly")}
+              disabled={!canEdit}
+              aria-pressed={recurrenceType === "yearly"}
+              className="font-mono-brutal text-xs uppercase py-2 disabled:opacity-60"
+              style={{
+                backgroundColor: recurrenceType === "yearly" ? inkColor : bgColor,
+                color: recurrenceType === "yearly" ? bgColor : inkColor,
+                border: `3px solid ${inkColor}`,
+              }}
+            >
+              Cada año
+            </button>
+          </div>
+          {recurrenceType === "monthly" && (
+            <p className="font-mono-brutal text-[10px] uppercase opacity-70 mb-2 leading-relaxed">
+              Se repite el mismo día de cada mes. Si el mes es más corto, se usa el último día.
+            </p>
+          )}
+          {recurrenceType === "yearly" && (
+            <p className="font-mono-brutal text-[10px] uppercase opacity-70 mb-2 leading-relaxed">
+              Se repite el mismo día y mes cada año. El 29 de febrero se ajusta al 28 en años no bisiestos.
+            </p>
+          )}
           <input
             type="number"
             min={1}
             max={365}
             value={recurrenceIntervalDays}
-            onChange={(e) => setRecurrenceIntervalDays(e.target.value)}
+            onChange={(e) => {
+              const value = e.target.value;
+              setRecurrenceIntervalDays(value);
+              setRecurrenceDays([]);
+              setRecurrenceType(value ? "interval" : null);
+            }}
             disabled={!canEdit}
             placeholder="O cada N días (ej. 28)"
             className="w-full px-4 py-3 font-mono-brutal text-lg outline-hidden disabled:opacity-60"

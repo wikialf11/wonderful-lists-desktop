@@ -2,6 +2,12 @@ import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/local/client";
 import { toast } from "sonner";
 import { getTimeRemaining } from "@/lib/timeRemaining";
+import {
+  calendarOccurrenceDay,
+  isCalendarRecurrence,
+  normalizeRecurrenceType,
+  parseDateOnly,
+} from "@/lib/recurrence";
 import { Check } from "lucide-react";
 import type { List } from "@/hooks/useLists";
 
@@ -28,6 +34,8 @@ type RawTask = {
   list_id: string;
   recurrence_days: number[] | null;
   recurrence_interval_days?: number | null;
+  recurrence_anchor_date?: string | null;
+  recurrence_type?: string | null;
   recurrence_parent_id?: string | null;
 };
 
@@ -67,7 +75,7 @@ export const CalendarView = ({ lists, bgColor, inkColor }: Props) => {
     setLoading(true);
     const { data, error } = await supabase
       .from("tasks")
-      .select("id, name, description, due_date, list_id, recurrence_days, recurrence_interval_days, recurrence_parent_id")
+      .select("id, name, description, due_date, list_id, recurrence_days, recurrence_interval_days, recurrence_anchor_date, recurrence_type, recurrence_parent_id")
       .in("list_id", listIds)
       .is("completed_at", null);
     setLoading(false);
@@ -96,7 +104,7 @@ export const CalendarView = ({ lists, bgColor, inkColor }: Props) => {
     // Real dated tasks (exclude 1970 anchor templates used for recurrences).
     for (const t of raw) {
       const isTemplate = !t.recurrence_parent_id &&
-        ((t.recurrence_days?.length ?? 0) > 0 || (t.recurrence_interval_days ?? 0) > 0);
+        normalizeRecurrenceType(t.recurrence_type, t.recurrence_days ?? [], t.recurrence_interval_days ?? 0) !== null;
       if (isTemplate) continue;
       if (!t.due_date) continue;
       const d = new Date(t.due_date);
@@ -131,6 +139,52 @@ export const CalendarView = ({ lists, bgColor, inkColor }: Props) => {
         d.setHours(23, 59, 0, 0);
         const occKey = `${t.id}::${dayKey(d)}`;
         if (completedKeys.has(occKey)) continue;
+        result.push({
+          id: occKey,
+          source_id: t.id,
+          name: t.name,
+          description: t.description,
+          due_date: d.toISOString(),
+          list_id: t.list_id,
+          virtual: true,
+        });
+      }
+    }
+
+    // Monthly/yearly rules: project the next occurrences. The anchor's day is
+    // clamped to the last day of shorter months, so 31 Jan → 28/29 Feb and a
+    // 29 Feb birthday → 28 Feb in non-leap years.
+    const realInstanceKeys = new Set(
+      raw
+        .filter((t) => t.recurrence_parent_id && t.due_date)
+        .map((t) => `${t.recurrence_parent_id}::${dayKey(new Date(t.due_date!))}`),
+    );
+    for (const t of raw) {
+      if (t.recurrence_parent_id) continue;
+      const type = normalizeRecurrenceType(
+        t.recurrence_type,
+        t.recurrence_days ?? [],
+        t.recurrence_interval_days ?? 0,
+      );
+      if (!isCalendarRecurrence(type)) continue;
+      const anchor = t.recurrence_anchor_date
+        ?? (t.due_date && new Date(t.due_date).getUTCFullYear() !== 1970
+          ? t.due_date.slice(0, 10)
+          : null);
+      if (!anchor) continue;
+      const anchorParts = parseDateOnly(anchor);
+      if (!anchorParts) continue;
+      const anchorStart = new Date(anchorParts.year, anchorParts.month, 1);
+      const horizon = type === "monthly" ? 120 : 366;
+      for (let i = 0; i <= horizon; i++) {
+        const d = new Date(today);
+        d.setDate(today.getDate() + i);
+        if (d < anchorStart) continue;
+        const expected = calendarOccurrenceDay(type, anchor, d.getFullYear(), d.getMonth());
+        if (expected === null || d.getDate() !== expected) continue;
+        const occKey = `${t.id}::${dayKey(d)}`;
+        if (completedKeys.has(occKey) || realInstanceKeys.has(occKey)) continue;
+        d.setHours(23, 59, 0, 0);
         result.push({
           id: occKey,
           source_id: t.id,
@@ -194,6 +248,8 @@ export const CalendarView = ({ lists, bgColor, inkColor }: Props) => {
         recurrence_parent_id: task.source_id,
         recurrence_days: [],
         recurrence_interval_days: 0,
+        recurrence_type: null,
+        recurrence_anchor_date: null,
       });
       if (insErr) {
         toast.error("No se pudo completar");

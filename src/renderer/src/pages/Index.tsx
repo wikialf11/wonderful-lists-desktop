@@ -24,6 +24,10 @@ import { TaskFilesEditor } from "@/components/TaskFilesEditor";
 import { TaskTableEditor } from "@/components/TaskTableEditor";
 import { parseTaskFiles, type TaskFile } from "@/lib/taskFiles";
 import { parseTaskTable, emptyTaskTable, type TaskTable } from "@/lib/taskTable";
+import {
+  normalizeRecurrenceType,
+  type RecurrenceType,
+} from "@/lib/recurrence";
 
 
 import { toast } from "sonner";
@@ -36,6 +40,7 @@ type Task = {
   recurrence_days?: number[];
   recurrence_interval_days?: number;
   recurrence_anchor_date?: string | null;
+  recurrence_type?: string | null;
   reminder_at?: string | null;
   checklist?: ChecklistItem[];
   task_files?: TaskFile[];
@@ -70,6 +75,7 @@ const Index = () => {
   const [recurrenceDays, setRecurrenceDays] = useState<number[]>([]);
   const [recurrenceIntervalDays, setRecurrenceIntervalDays] = useState<string>("");
   const [recurrenceAnchorDate, setRecurrenceAnchorDate] = useState<string>("");
+  const [recurrenceType, setRecurrenceType] = useState<RecurrenceType | null>(null);
   const [completable, setCompletable] = useState(false);
   const [link, setLink] = useState("");
   const [reminderAt, setReminderAt] = useState("");
@@ -171,7 +177,12 @@ const Index = () => {
         // clear field values when removed
         if (k === "description") setDescription("");
         if (k === "date") { setDueDay(""); setDueTime(""); }
-        if (k === "recurrence") { setRecurrenceDays([]); setRecurrenceIntervalDays(""); setRecurrenceAnchorDate(""); }
+        if (k === "recurrence") {
+          setRecurrenceDays([]);
+          setRecurrenceIntervalDays("");
+          setRecurrenceAnchorDate("");
+          setRecurrenceType(null);
+        }
         if (k === "completable") setCompletable(false);
         if (k === "link") setLink("");
         if (k === "reminder") setReminderAt("");
@@ -255,7 +266,7 @@ const Index = () => {
     }
     const { data, error } = await supabase
       .from("tasks")
-      .select("id, name, description, due_date, created_at, recurrence_days, recurrence_interval_days, recurrence_anchor_date, reminder_at, checklist, task_files, table_data, recurrence_parent_id, completable, link, folder_id")
+      .select("id, name, description, due_date, created_at, recurrence_days, recurrence_interval_days, recurrence_anchor_date, recurrence_type, reminder_at, checklist, task_files, table_data, recurrence_parent_id, completable, link, folder_id")
       .eq("list_id", activeListId)
       .is("completed_at", null);
     if (error) {
@@ -274,7 +285,11 @@ const Index = () => {
     // panel so the list only shows today's instances.
     const isTemplate = (t: Task) =>
       !t.recurrence_parent_id &&
-      ((t.recurrence_days?.length ?? 0) > 0 || (t.recurrence_interval_days ?? 0) > 0);
+      normalizeRecurrenceType(
+        t.recurrence_type,
+        t.recurrence_days ?? [],
+        t.recurrence_interval_days ?? 0,
+      ) !== null;
     setRecurringTemplates(rows.filter(isTemplate) as RecurringTemplate[]);
     rows = rows.filter((t) => !isTemplate(t));
 
@@ -373,10 +388,12 @@ const Index = () => {
     if (!name.trim() || !user || !activeListId) return;
     const intervalNum = parseInt(recurrenceIntervalDays, 10);
     const hasInterval = !isNaN(intervalNum) && intervalNum > 0;
-    const anchorForInterval = hasInterval
-      ? (recurrenceAnchorDate || new Date().toISOString().slice(0, 10))
+    const hasCalendarRecurrence = recurrenceType === "monthly" || recurrenceType === "yearly";
+    const anchorForInterval = hasInterval || hasCalendarRecurrence
+      ? (dueDay || recurrenceAnchorDate || new Date().toISOString().slice(0, 10))
       : null;
-    const hasAnyRecurrence = recurrenceDays.length > 0 || hasInterval;
+    const hasAnyRecurrence =
+      recurrenceDays.length > 0 || hasInterval || hasCalendarRecurrence;
     let dueIso: string | null = null;
     if (dueDay || dueTime) {
       // If only time is set with any recurrence, store as time-only template
@@ -407,6 +424,7 @@ const Index = () => {
       recurrence_days: recurrenceDays,
       recurrence_interval_days: hasInterval ? intervalNum : 0,
       recurrence_anchor_date: anchorForInterval,
+      recurrence_type: recurrenceType,
       completable,
       link: link.trim() || null,
       reminder_at: reminderAt ? new Date(reminderAt).toISOString() : null,
@@ -449,6 +467,7 @@ const Index = () => {
     setRecurrenceDays([]);
     setRecurrenceIntervalDays("");
     setRecurrenceAnchorDate("");
+    setRecurrenceType(null);
     setCompletable(false);
     setLink("");
     setReminderAt("");
@@ -459,17 +478,33 @@ const Index = () => {
     setActiveCustomFieldIds(new Set());
     setCustomValues({});
     setShowForm(false);
-    if (recurrenceDays.length > 0 || hasInterval) {
+    if (hasAnyRecurrence) {
       await supabase.rpc("generate_recurring_tasks");
       toast.success("Repetición creada. Gestiónala en Repeticiones.");
     }
     await Promise.all([loadTasks(), loadTaskCustomValues()]);
   };
 
+  const todayKey = () => new Date().toISOString().slice(0, 10);
+
+  const setWeeklyRecurrence = (days: number[]) => {
+    setRecurrenceDays(days);
+    setRecurrenceIntervalDays("");
+    setRecurrenceType(days.length > 0 ? "weekly" : null);
+  };
+
   const toggleRecurrenceDay = (d: number) => {
-    setRecurrenceDays((prev) =>
-      prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort()
-    );
+    const next = recurrenceDays.includes(d)
+      ? recurrenceDays.filter((x) => x !== d)
+      : [...recurrenceDays, d].sort();
+    setWeeklyRecurrence(next);
+  };
+
+  const setCalendarRecurrence = (type: "monthly" | "yearly") => {
+    setRecurrenceType(type);
+    setRecurrenceDays([]);
+    setRecurrenceIntervalDays("");
+    setRecurrenceAnchorDate(dueDay || recurrenceAnchorDate || todayKey());
   };
   const WEEKDAYS = ["D", "L", "M", "X", "J", "V", "S"];
 
@@ -968,7 +1003,7 @@ const Index = () => {
                         </div>
                         <div className="grid grid-cols-7 gap-2 mb-2">
                           {WEEKDAYS.map((label, idx) => {
-                            const active = recurrenceDays.includes(idx);
+                            const active = recurrenceType === "weekly" && recurrenceDays.includes(idx);
                             return (
                               <button
                                 key={idx}
@@ -989,26 +1024,69 @@ const Index = () => {
                           })}
                         </div>
                         <div className="flex gap-2 mb-2">
-                          <button type="button" onClick={() => setRecurrenceDays([0,1,2,3,4,5,6])}
+                          <button type="button" onClick={() => setWeeklyRecurrence([0,1,2,3,4,5,6])}
                             className="flex-1 font-mono-brutal text-[10px] uppercase py-2"
                             style={{ ...paperStyle, color: inkColor, border: `3px solid ${inkColor}` }}>Todos</button>
-                          <button type="button" onClick={() => setRecurrenceDays([1,2,3,4,5])}
+                          <button type="button" onClick={() => setWeeklyRecurrence([1,2,3,4,5])}
                             className="flex-1 font-mono-brutal text-[10px] uppercase py-2"
                             style={{ ...paperStyle, color: inkColor, border: `3px solid ${inkColor}` }}>L–V</button>
-                          <button type="button" onClick={() => setRecurrenceDays([0,6])}
+                          <button type="button" onClick={() => setWeeklyRecurrence([0,6])}
                             className="flex-1 font-mono-brutal text-[10px] uppercase py-2"
                             style={{ ...paperStyle, color: inkColor, border: `3px solid ${inkColor}` }}>S–D</button>
-                          <button type="button" onClick={() => setRecurrenceDays([])}
+                          <button type="button" onClick={() => setWeeklyRecurrence([])}
                             className="flex-1 font-mono-brutal text-[10px] uppercase py-2"
                             style={{ ...paperStyle, color: inkColor, border: `3px solid ${inkColor}` }}>Ninguno</button>
                         </div>
+                        <div className="grid grid-cols-2 gap-2 mb-2">
+                          <button
+                            type="button"
+                            onClick={() => setCalendarRecurrence("monthly")}
+                            aria-pressed={recurrenceType === "monthly"}
+                            className="font-mono-brutal text-xs uppercase py-2"
+                            style={{
+                              backgroundColor: recurrenceType === "monthly" ? inkColor : bgColor,
+                              color: recurrenceType === "monthly" ? bgColor : inkColor,
+                              border: `3px solid ${inkColor}`,
+                            }}
+                          >
+                            Cada mes
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCalendarRecurrence("yearly")}
+                            aria-pressed={recurrenceType === "yearly"}
+                            className="font-mono-brutal text-xs uppercase py-2"
+                            style={{
+                              backgroundColor: recurrenceType === "yearly" ? inkColor : bgColor,
+                              color: recurrenceType === "yearly" ? bgColor : inkColor,
+                              border: `3px solid ${inkColor}`,
+                            }}
+                          >
+                            Cada año
+                          </button>
+                        </div>
+                        {recurrenceType === "monthly" && (
+                          <p className="font-mono-brutal text-[10px] uppercase opacity-70 mb-2 leading-relaxed">
+                            Se repite el mismo día de cada mes. Si el mes es más corto, se usa el último día.
+                          </p>
+                        )}
+                        {recurrenceType === "yearly" && (
+                          <p className="font-mono-brutal text-[10px] uppercase opacity-70 mb-2 leading-relaxed">
+                            Se repite el mismo día y mes cada año. El 29 de febrero se ajusta al 28 en años no bisiestos.
+                          </p>
+                        )}
                         <input
                           type="number"
                           min={1}
                           max={365}
                           value={recurrenceIntervalDays}
                           aria-label="Repetir cada N días"
-                          onChange={(e) => setRecurrenceIntervalDays(e.target.value)}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setRecurrenceIntervalDays(value);
+                            setRecurrenceDays([]);
+                            setRecurrenceType(value ? "interval" : null);
+                          }}
                           placeholder="O cada N días (ej. 28)"
                           className="w-full px-4 py-3 font-mono-brutal text-lg outline-hidden"
                           style={{ ...paperStyle, color: inkColor, border: `3px solid ${inkColor}` }}
@@ -1321,13 +1399,14 @@ const Index = () => {
                           recurrenceDays={t.recurrence_days ?? []}
                           recurrenceIntervalDays={t.recurrence_interval_days ?? 0}
                           recurrenceAnchorDate={t.recurrence_anchor_date ?? null}
+                          recurrenceType={t.recurrence_type ?? null}
                           link={t.link ?? null}
                           reminderAt={t.reminder_at ?? null}
                           checklist={t.checklist ?? []}
                           onToggleChecklist={(itemId) => void toggleChecklistItem(t.id, itemId)}
                           taskFiles={t.task_files ?? []}
                           tableData={t.table_data ?? null}
-                          isTemplate={!t.recurrence_parent_id && ((t.recurrence_days?.length ?? 0) > 0 || (t.recurrence_interval_days ?? 0) > 0)}
+                          isTemplate={!t.recurrence_parent_id && normalizeRecurrenceType(t.recurrence_type, t.recurrence_days ?? [], t.recurrence_interval_days ?? 0) !== null}
                           listId={activeListId!}
                           userId={user.id}
                           completable={isCompletable}

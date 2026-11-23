@@ -24,6 +24,7 @@ type Props = {
   recurrenceDays?: number[];
   recurrenceIntervalDays?: number;
   recurrenceAnchorDate?: string | null;
+  recurrenceType?: string | null;
   reminderAt?: string | null;
   checklist?: ChecklistItem[];
   onToggleChecklist?: (itemId: string) => void;
@@ -51,8 +52,11 @@ const WEEKDAY_INITIALS = ["D", "L", "M", "X", "J", "V", "S"];
 const getNextRecurrenceLabel = (
   days: number[] | undefined,
   intervalDays: number | undefined,
-  anchorDate: string | null | undefined
+  anchorDate: string | null | undefined,
+  recurrenceType: string | null | undefined,
 ): string | null => {
+  if (recurrenceType === "monthly") return "1M";
+  if (recurrenceType === "yearly") return "1A";
   // Weekly: next matching weekday initial
   if (days && days.length > 0) {
     const today = new Date().getDay();
@@ -68,7 +72,7 @@ const getNextRecurrenceLabel = (
   return null;
 };
 
-export const TaskItem = ({ id, name, description, dueDate, recurrenceDays, recurrenceIntervalDays, recurrenceAnchorDate, reminderAt, checklist = [], onToggleChecklist, taskFiles = [], tableData = null, isTemplate = false, link, listId, userId, completable = true, canComplete = true, canLongPress = true, onDelete, onLongPress, bgColor, inkColor, customFields = [], customValues = {}, relatedTaskNames = {} }: Props) => {
+export const TaskItem = ({ id, name, description, dueDate, recurrenceDays, recurrenceIntervalDays, recurrenceAnchorDate, recurrenceType, reminderAt, checklist = [], onToggleChecklist, taskFiles = [], tableData = null, isTemplate = false, link, listId, userId, completable = true, canComplete = true, canLongPress = true, onDelete, onLongPress, bgColor, inkColor, customFields = [], customValues = {}, relatedTaskNames = {} }: Props) => {
   const [, tick] = useState(0);
   const checklistItems = parseChecklist(checklist);
   const fileItems = parseTaskFiles(taskFiles);
@@ -212,7 +216,7 @@ export const TaskItem = ({ id, name, description, dueDate, recurrenceDays, recur
       </div>
 
       {(() => {
-        const nextInitial = getNextRecurrenceLabel(recurrenceDays, recurrenceIntervalDays, recurrenceAnchorDate);
+        const nextInitial = getNextRecurrenceLabel(recurrenceDays, recurrenceIntervalDays, recurrenceAnchorDate, recurrenceType);
         const hasDesc = !!(description && description.trim() !== "");
         const hasAnyMeta = hasDesc || !!nextInitial || !!reminderAt || isTemplate;
         if (!hasAnyMeta) return null;

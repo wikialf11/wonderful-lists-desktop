@@ -57,8 +57,11 @@ para conservar una copia fuera.
 - **Segmentar tarea**: checklist de subtareas con barra de progreso de 0 a 100%.
 - **Archivos**: varios archivos por tarea, cualquier extensión, guardados en tu equipo.
 - **Tabla**: cuadrante editable que se ve directamente en la tarjeta.
-- Repeticiones semanales o por intervalo, gestionadas en **Repeticiones**
-  (la plantilla no ocupa un item en la lista).
+- Repeticiones semanales, cada N días, **cada mes** y **cada año**, gestionadas
+  en **Repeticiones** (la plantilla no ocupa un item en la lista). Las reglas
+  mensuales/anuales ajustan el día al último del mes cuando hace falta: el 31
+  cae en 30/28/29 y un cumpleaños del 29 de febrero se celebra el 28 en los
+  años no bisiestos.
 - Recordatorios con notificación local en la fecha y hora que elijas.
 - Carpetas y subcarpetas con arrastrar y soltar.
 - Calendario, búsqueda y panel de completadas.

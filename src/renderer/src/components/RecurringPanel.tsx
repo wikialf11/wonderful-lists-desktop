@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { Pencil, Repeat, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  isCalendarRecurrence,
+  nextCalendarOccurrence,
+  normalizeRecurrenceType,
+} from "@/lib/recurrence";
 
 export type RecurringTemplate = {
   id: string;
@@ -10,6 +15,7 @@ export type RecurringTemplate = {
   recurrence_days?: number[];
   recurrence_interval_days?: number;
   recurrence_anchor_date?: string | null;
+  recurrence_type?: string | null;
 };
 
 type Props = {
@@ -27,6 +33,9 @@ const WEEKDAYS = ["DOM", "LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB"];
 function recurrenceLabel(template: RecurringTemplate): string {
   const days = Array.isArray(template.recurrence_days) ? template.recurrence_days : [];
   const interval = template.recurrence_interval_days ?? 0;
+  const type = normalizeRecurrenceType(template.recurrence_type, days, interval);
+  if (type === "monthly") return "Cada mes";
+  if (type === "yearly") return "Cada año";
   if (days.length === 7) return "Todos los días";
   if (days.length > 0) return days.map((day) => WEEKDAYS[day] ?? day).join(" · ");
   if (interval > 0) return `Cada ${interval} día${interval === 1 ? "" : "s"}`;
@@ -36,6 +45,19 @@ function recurrenceLabel(template: RecurringTemplate): string {
 function nextDate(template: RecurringTemplate): string {
   const days = Array.isArray(template.recurrence_days) ? template.recurrence_days : [];
   const interval = template.recurrence_interval_days ?? 0;
+  const type = normalizeRecurrenceType(template.recurrence_type, days, interval);
+
+  if (isCalendarRecurrence(type)) {
+    const anchor = template.recurrence_anchor_date
+      ?? (template.due_date && new Date(template.due_date).getUTCFullYear() !== 1970
+        ? template.due_date.slice(0, 10)
+        : null);
+    const next = nextCalendarOccurrence(type, anchor);
+    return next
+      ? next.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" })
+      : "—";
+  }
+
   const due = template.due_date ? new Date(template.due_date) : null;
 
   // A real due date is the best source of truth (not the 1970 time-only anchor).

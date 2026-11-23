@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
+import { matchesCalendarRecurrence } from "./recurrence";
 
 /**
  * Local, single-user storage. The whole app runs on the user's machine:
@@ -55,7 +56,7 @@ const TABLES: Record<string, TableMeta> = {
   tasks: {
     columns: [
       "id", "list_id", "user_id", "name", "description", "due_date", "created_at", "updated_at",
-      "recurrence_days", "recurrence_interval_days", "recurrence_anchor_date", "recurrence_parent_id",
+      "recurrence_days", "recurrence_interval_days", "recurrence_anchor_date", "recurrence_type", "recurrence_parent_id",
       "assigned_to_email", "completable", "edit_locked", "link", "rating_enabled", "folder_id",
       "completed_at", "reminder_at", "reminder_sent_at", "checklist", "task_files", "table_data",
     ],
@@ -68,6 +69,7 @@ const TABLES: Record<string, TableMeta> = {
       recurrence_days: [],
       recurrence_interval_days: 0,
       recurrence_anchor_date: null,
+      recurrence_type: null,
       recurrence_parent_id: null,
       assigned_to_email: null,
       completable: false,
@@ -252,6 +254,7 @@ function createSchema(database: NonNullable<typeof db>): void {
       recurrence_days TEXT NOT NULL DEFAULT '[]',
       recurrence_interval_days INTEGER NOT NULL DEFAULT 0,
       recurrence_anchor_date TEXT,
+      recurrence_type TEXT,
       recurrence_parent_id TEXT,
       assigned_to_email TEXT,
       completable INTEGER NOT NULL DEFAULT 0,
@@ -356,6 +359,9 @@ function createSchema(database: NonNullable<typeof db>): void {
   }
   if (!taskColumns.some((column) => column.name === "checklist")) {
     database.exec("ALTER TABLE tasks ADD COLUMN checklist TEXT NOT NULL DEFAULT '[]'");
+  }
+  if (!taskColumns.some((column) => column.name === "recurrence_type")) {
+    database.exec("ALTER TABLE tasks ADD COLUMN recurrence_type TEXT");
   }
   if (!taskColumns.some((column) => column.name === "task_files")) {
     database.exec("ALTER TABLE tasks ADD COLUMN task_files TEXT NOT NULL DEFAULT '[]'");
@@ -907,11 +913,17 @@ export function executeLocalRpc(name: string, args: unknown): LocalResult {
         const days = Array.isArray(raw["recurrence_days"]) ? (raw["recurrence_days"] as number[]) : [];
         const interval = Number(raw["recurrence_interval_days"] ?? 0);
         const anchor = typeof raw["recurrence_anchor_date"] === "string" ? raw["recurrence_anchor_date"] : null;
-        let qualifies = days.includes(dow);
-        if (!qualifies && interval > 0 && anchor) {
-          const anchorDate = new Date(`${anchor}T00:00:00Z`);
-          const diff = Math.round((date.getTime() - anchorDate.getTime()) / 86400000);
-          qualifies = diff >= 0 && diff % interval === 0;
+        const recurrenceType = typeof raw["recurrence_type"] === "string" ? raw["recurrence_type"] : null;
+        let qualifies = false;
+        if (recurrenceType === "monthly" || recurrenceType === "yearly") {
+          qualifies = matchesCalendarRecurrence(recurrenceType, anchor, date);
+        } else {
+          qualifies = days.includes(dow);
+          if (!qualifies && interval > 0 && anchor) {
+            const anchorDate = new Date(`${anchor}T00:00:00Z`);
+            const diff = Math.round((date.getTime() - anchorDate.getTime()) / 86400000);
+            qualifies = diff >= 0 && diff % interval === 0;
+          }
         }
         if (!qualifies) continue;
 
@@ -953,6 +965,8 @@ export function executeLocalRpc(name: string, args: unknown): LocalResult {
             recurrence_parent_id: raw["id"],
             recurrence_days: [],
             recurrence_interval_days: 0,
+            recurrence_type: null,
+            recurrence_anchor_date: null,
             completed_at: null,
             reminder_at: null,
             reminder_sent_at: null,
